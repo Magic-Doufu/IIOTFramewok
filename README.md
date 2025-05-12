@@ -17,10 +17,11 @@
 
 ## 核心
 - 核心負責管理設備樹、整體流程控制、通訊與GUI Render。
-- 提供設備樹與設備接口。
-- 提供流程管理，採非同步通訊。
+- 提供設備樹。
+- 提供流程管理與封裝為`Task`，主要加速來自採非同步通訊。
 - 提供 `logger` 供外部設備註冊。
 - 提供系統資訊，如 `tree()` , `errors()` 等介面以通知外部(主動通知或被動通知)。
+- 提供 GUI plugin 註冊與調用，其預計與 `BaseNode<T>` 協作。
 
 ### 介面
 - 事件接口，設備通知時觸發 event action 執行對應事件。
@@ -30,6 +31,7 @@
 - TaskExecutor
     - 負責流程的執行與暫停、終止。
     - `CancellationTokenSource` 用於急停 `Task`。
+
 ## Plugins
 - 設備(Device)
     - 繼承自核心提供的 `Interface Class`。
@@ -51,9 +53,6 @@
 - 使用DI，註冊至上層節點，最終會形成樹狀結構表。
 - SearchDevice，回傳Device或null。
 - 設備異常時如果不是Root Node，向上冒泡。
-
-## 通訊介面－InterFaces
-- `Interface Class` 採用非同步通訊，但同時需要持有鎖，用以避免被重複存取。
 
 ## Basic GUI
 - 核心可以在不啟動GUI情況下運作。
