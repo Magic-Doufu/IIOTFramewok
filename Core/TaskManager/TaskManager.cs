@@ -64,8 +64,6 @@ namespace IIOTFramework.Core
         public TaskManager() => executor = new TaskExecutor(this);
 
         private readonly ConcurrentQueue<List<Func<CancellationToken, Task>>> taskQueue = new();
-        public void Enqueue(Func<CancellationToken, Task> task)
-            => taskQueue.Enqueue(new List<Func<CancellationToken, Task>> { task });
         public void Enqueue(params Func<CancellationToken, Task>[] tasks) => taskQueue.Enqueue(tasks.ToList());
         public List<Func<CancellationToken, Task>> Dequeue()
             => taskQueue.TryDequeue(out var tasks) ? tasks : new List<Func<CancellationToken, Task>>();
