@@ -1,52 +1,80 @@
-public class TaskExecutor
+using System.Collections.Concurrent;
+
+namespace IIOTFramework.Core
 {
-    private readonly TaskManager taskManager;
-    private readonly CancellationTokenSource cancellationTokenSource = new();
-    private readonly ManualResetEventSlim pauseEvent = new(true);
-
-    public TaskExecutor(TaskManager manager)
+    public class TaskExecutor
     {
-        taskManager = manager;
-    }
+        private readonly TaskManager taskManager;
+        private TaskCompletionSource<bool> pauseSignal = new();
+        private CancellationTokenSource cts = new CancellationTokenSource();
+        public Task? runningTask { get; private set; }
 
-    public void Start()
-    {
-        Task.Run(async () =>
+        public bool IsBusy { get; private set; } = false;
+        private void init()
         {
-            while (!cancellationTokenSource.Token.IsCancellationRequested)
-            {
-                pauseEvent.Wait();
-                var tasks = taskManager.Dequeue();
-                if (tasks != null)
-                {
-                    await Task.WhenAll(tasks);
+            cts = new();
+            IsBusy = false;
+            pauseSignal = new TaskCompletionSource<bool>();
+            pauseSignal.SetResult(true);
+        }
+        public TaskExecutor(TaskManager manager) => taskManager = manager;
+
+        async Task ExecuteAsync(CancellationToken token)
+        {
+            try {
+                while (!token.IsCancellationRequested) {
+                    var tasks = taskManager.Dequeue();
+                    await (tasks.Any() ?
+                        Task.WhenAll(tasks.Select(task => task(token))) : Task.Delay(100, token));
                 }
-                await Task.Delay(100);
+            } catch (TaskCanceledException) {
+                Console.WriteLine("[Task] Has been canceled.");
+            } finally {
+                Console.WriteLine($"[Task] {taskManager.QSize} tasks remaining. Cleaning up...");
+                taskManager.Clear();
+                Console.WriteLine("[Task] Gracefully cleaned up.");
             }
-        }, cancellationTokenSource.Token);
+        }
+
+        public void Start()
+        {
+            init();
+            runningTask = Task.Run(async () => { await ExecuteAsync(cts.Token); });
+        }
+        public void Pause()
+        {
+            pauseSignal = new TaskCompletionSource<bool>();
+        }
+        public void Resume() => pauseSignal.SetResult(true);
+        public async Task Stop()
+        {
+            if (runningTask != null) {
+                Console.WriteLine("[Task] Cancelling ...");
+                cts.Cancel();
+                await runningTask;
+            }
+        }
     }
 
-    public void Pause() => pauseEvent.Reset();
-    public void Resume() => pauseEvent.Set();
-    public void Stop() => cancellationTokenSource.Cancel();
-}
-
-public class TaskManager
-{
-    private readonly Queue<List<Task>> taskQueue = new();
-    private readonly TaskExecutor executor;
-
-    public TaskManager()
+    public class TaskManager
     {
-        executor = new TaskExecutor(this);
+        private readonly TaskExecutor executor;
+        public bool IsBusy { get => executor.IsBusy; }
+
+        public TaskManager() => executor = new TaskExecutor(this);
+
+        private readonly ConcurrentQueue<List<Func<CancellationToken, Task>>> taskQueue = new();
+        public void Enqueue(Func<CancellationToken, Task> task)
+            => taskQueue.Enqueue(new List<Func<CancellationToken, Task>> { task });
+        public void Enqueue(params Func<CancellationToken, Task>[] tasks) => taskQueue.Enqueue(tasks.ToList());
+        public List<Func<CancellationToken, Task>> Dequeue()
+            => taskQueue.TryDequeue(out var tasks) ? tasks : new List<Func<CancellationToken, Task>>();
+        public int QSize => taskQueue.Count;
+
+        public void Start() => executor.Start();
+        public void Pause() => executor.Pause();
+        public void Resume() => executor.Resume();
+        public async Task Stop() => await executor.Stop();
+        public void Clear() => taskQueue.Clear();
     }
-
-    public void Enqueue(Task task) => taskQueue.Enqueue(new List<Task> { task });
-    public void Enqueue(IEnumerable<Task> tasks) => taskQueue.Enqueue(tasks.ToList());
-    public List<Task>? Dequeue() => taskQueue.Count > 0 ? taskQueue.Dequeue() : null;
-
-    public void StartExecution() => executor.Start();
-    public void PauseExecution() => executor.Pause();
-    public void ResumeExecution() => executor.Resume();
-    public void StopExecution() => executor.Stop();
 }
